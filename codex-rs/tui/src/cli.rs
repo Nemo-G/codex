@@ -2,6 +2,7 @@ use clap::Parser;
 use clap::ValueHint;
 use codex_common::ApprovalModeCliArg;
 use codex_common::CliConfigOverrides;
+use codex_common::WireApiCliArg;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -35,6 +36,14 @@ pub struct Cli {
     /// Model the agent should use.
     #[arg(long, short = 'm')]
     pub model: Option<String>,
+
+    /// Force which OpenAI-compatible wire protocol to use for the selected model provider.
+    /// - `responses` -> POST `/v1/responses`
+    /// - `chat` -> POST `/v1/chat/completions`
+    ///
+    /// This overrides the provider's configured `wire_api` for this run only.
+    #[arg(long = "wire-api")]
+    pub wire_api: Option<WireApiCliArg>,
 
     /// Convenience flag to select the local open source model provider. Equivalent to -c
     /// model_provider=oss; verifies a local LM Studio or Ollama server is running.

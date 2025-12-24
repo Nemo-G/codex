@@ -734,6 +734,9 @@ fn merge_resume_cli_flags(interactive: &mut TuiCli, resume_cli: TuiCli) {
     if let Some(model) = resume_cli.model {
         interactive.model = Some(model);
     }
+    if let Some(wire_api) = resume_cli.wire_api {
+        interactive.wire_api = Some(wire_api);
+    }
     if resume_cli.oss {
         interactive.oss = true;
     }

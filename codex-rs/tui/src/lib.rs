@@ -219,6 +219,7 @@ pub async fn run_main(
         sandbox_mode,
         cwd,
         model_provider: model_provider_override.clone(),
+        wire_api: cli.wire_api.map(Into::into),
         config_profile: cli.config_profile.clone(),
         codex_linux_sandbox_exe,
         show_raw_agent_reasoning: cli.oss.then_some(true),

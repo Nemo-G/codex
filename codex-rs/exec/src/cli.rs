@@ -18,6 +18,14 @@ pub struct Cli {
     #[arg(long, short = 'm')]
     pub model: Option<String>,
 
+    /// Force which OpenAI-compatible wire protocol to use for the selected model provider.
+    /// - `responses` -> POST `/v1/responses`
+    /// - `chat` -> POST `/v1/chat/completions`
+    ///
+    /// This overrides the provider's configured `wire_api` for this run only.
+    #[arg(long = "wire-api", value_enum)]
+    pub wire_api: Option<codex_common::WireApiCliArg>,
+
     /// Use open-source provider.
     #[arg(long = "oss", default_value_t = false)]
     pub oss: bool,

@@ -1,3 +1,4 @@
+use crate::WireApi;
 use crate::auth::AuthCredentialsStoreMode;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
 use crate::config::types::History;
@@ -1018,6 +1019,8 @@ pub struct ConfigOverrides {
     pub approval_policy: Option<AskForApproval>,
     pub sandbox_mode: Option<SandboxMode>,
     pub model_provider: Option<String>,
+    /// Override the wire API used for the selected model provider for this session.
+    pub wire_api: Option<WireApi>,
     pub config_profile: Option<String>,
     pub codex_linux_sandbox_exe: Option<PathBuf>,
     pub base_instructions: Option<String>,
@@ -1087,6 +1090,7 @@ impl Config {
             approval_policy: approval_policy_override,
             sandbox_mode,
             model_provider,
+            wire_api: wire_api_override,
             config_profile: config_profile_key,
             codex_linux_sandbox_exe,
             base_instructions,
@@ -1201,7 +1205,7 @@ impl Config {
             .or(config_profile.model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "openai".to_string());
-        let model_provider = model_providers
+        let mut model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
                 std::io::Error::new(
@@ -1210,6 +1214,9 @@ impl Config {
                 )
             })?
             .clone();
+        if let Some(wire_api) = wire_api_override {
+            model_provider.wire_api = wire_api;
+        }
 
         let shell_environment_policy = cfg.shell_environment_policy.into();
 

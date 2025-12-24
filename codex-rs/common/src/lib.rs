@@ -14,6 +14,12 @@ mod sandbox_mode_cli_arg;
 pub use sandbox_mode_cli_arg::SandboxModeCliArg;
 
 #[cfg(feature = "cli")]
+mod wire_api_cli_arg;
+
+#[cfg(feature = "cli")]
+pub use wire_api_cli_arg::WireApiCliArg;
+
+#[cfg(feature = "cli")]
 pub mod format_env_display;
 
 #[cfg(any(feature = "cli", test))]
