@@ -103,10 +103,7 @@ pub(crate) enum JsonSchema {
         properties: BTreeMap<String, JsonSchema>,
         #[serde(skip_serializing_if = "Option::is_none")]
         required: Option<Vec<String>>,
-        #[serde(
-            rename = "additionalProperties",
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(rename = "additionalProperties")]
         additional_properties: Option<AdditionalProperties>,
     },
 }
@@ -777,6 +774,33 @@ pub(crate) struct ApplyPatchToolArgs {
     pub(crate) input: String,
 }
 
+/// Ensures all object schemas in the tools JSON have additionalProperties set to false.
+/// OpenAI's function calling API requires this field to be present (and set to false).
+fn ensure_additional_properties(value: &mut JsonValue) {
+    match value {
+        JsonValue::Object(map) => {
+            // Recursively process all nested values FIRST to ensure we visit all schemas
+            for (_key, val) in map.iter_mut() {
+                ensure_additional_properties(val);
+            }
+
+            // If this is a JSON Schema object type, ensure additionalProperties is present and false.
+            // Some schemas (e.g. coming from MCP servers) may explicitly set additionalProperties=true;
+            // Azure requires all object schemas to have additionalProperties=false.
+            if map.get("type").and_then(JsonValue::as_str) == Some("object") {
+                // Always insert false, overriding any existing value including null or true
+                map.insert("additionalProperties".to_string(), JsonValue::Bool(false));
+            }
+        }
+        JsonValue::Array(arr) => {
+            for val in arr.iter_mut() {
+                ensure_additional_properties(val);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Returns JSON values that are compatible with Function Calling in the
 /// Responses API:
 /// https://platform.openai.com/docs/guides/function-calling?api-mode=responses
@@ -786,7 +810,9 @@ pub fn create_tools_json_for_responses_api(
     let mut tools_json = Vec::new();
 
     for tool in tools {
-        let json = serde_json::to_value(tool)?;
+        let mut json = serde_json::to_value(tool)?;
+        // Ensure all object schemas have additionalProperties set to false
+        ensure_additional_properties(&mut json);
         tools_json.push(json);
     }
 
@@ -798,8 +824,18 @@ pub fn create_tools_json_for_responses_api(
 pub(crate) fn create_tools_json_for_chat_completions_api(
     tools: &[ToolSpec],
 ) -> crate::error::Result<Vec<serde_json::Value>> {
-    // We start with the JSON for the Responses API and than rewrite it to match
-    // the chat completions tool call format.
+    // We start with the JSON for the Responses API and then rewrite it to match
+    // the Chat Completions tool call format.
+    //
+    // Chat Completions expects each entry to be:
+    // {
+    //   "type": "function",
+    //   "function": { "name": ..., "description": ..., "parameters": ... }
+    // }
+    //
+    // Some provider implementations (notably Azure-proxied ones) are strict
+    // about this shape; including non-standard top-level fields like "name"
+    // can cause schema validation to run against the wrong object.
     let responses_api_tools_json = create_tools_json_for_responses_api(tools)?;
     let tools_json = responses_api_tools_json
         .into_iter()
@@ -808,24 +844,19 @@ pub(crate) fn create_tools_json_for_chat_completions_api(
                 return None;
             }
 
-            if let Some(map) = tool.as_object_mut() {
-                let name = map
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                // Remove "type" field as it is not needed in chat completions.
-                map.remove("type");
-                Some(json!({
-                    "type": "function",
-                    "name": name,
-                    "function": map,
-                }))
-            } else {
-                None
-            }
+            let map = tool.as_object_mut()?;
+
+            // Remove fields that are not part of the Chat Completions tool schema.
+            map.remove("type");
+            map.remove("strict");
+
+            Some(json!({
+                "type": "function",
+                "function": map,
+            }))
         })
         .collect::<Vec<serde_json::Value>>();
+
     Ok(tools_json)
 }
 
@@ -956,14 +987,9 @@ fn sanitize_json_schema(value: &mut JsonValue) {
                         JsonValue::Object(serde_json::Map::new()),
                     );
                 }
-                // If additionalProperties is an object schema, sanitize it too.
-                // Leave booleans as-is, since JSON Schema allows boolean here.
-                if let Some(ap) = map.get_mut("additionalProperties") {
-                    let is_bool = matches!(ap, JsonValue::Bool(_));
-                    if !is_bool {
-                        sanitize_json_schema(ap);
-                    }
-                }
+                // Ensure additionalProperties is present and set to false
+                // Azure requires this field to be present and set to false, so always set it
+                map.insert("additionalProperties".to_string(), JsonValue::Bool(false));
             }
 
             // Ensure array schemas have items
@@ -1632,7 +1658,7 @@ mod tests {
                         ),
                     ]),
                     required: None,
-                    additional_properties: None,
+                    additional_properties: Some(false.into()),
                 },
                 description: "Do something cool".to_string(),
                 strict: false,
@@ -1765,7 +1791,7 @@ mod tests {
                         }
                     )]),
                     required: None,
-                    additional_properties: None,
+                    additional_properties: Some(false.into()),
                 },
                 description: "Search docs".to_string(),
                 strict: false,
@@ -1818,7 +1844,7 @@ mod tests {
                         JsonSchema::Number { description: None }
                     )]),
                     required: None,
-                    additional_properties: None,
+                    additional_properties: Some(false.into()),
                 },
                 description: "Pagination".to_string(),
                 strict: false,
@@ -1875,7 +1901,7 @@ mod tests {
                         }
                     )]),
                     required: None,
-                    additional_properties: None,
+                    additional_properties: Some(false.into()),
                 },
                 description: "Tags".to_string(),
                 strict: false,
@@ -1928,7 +1954,7 @@ mod tests {
                         JsonSchema::String { description: None }
                     )]),
                     required: None,
-                    additional_properties: None,
+                    additional_properties: Some(false.into()),
                 },
                 description: "AnyOf Value".to_string(),
                 strict: false,
@@ -2086,22 +2112,12 @@ Examples of valid command strings:
                                     "string_property".to_string(),
                                     "number_property".to_string(),
                                 ]),
-                                additional_properties: Some(
-                                    JsonSchema::Object {
-                                        properties: BTreeMap::from([(
-                                            "addtl_prop".to_string(),
-                                            JsonSchema::String { description: None }
-                                        ),]),
-                                        required: Some(vec!["addtl_prop".to_string(),]),
-                                        additional_properties: Some(false.into()),
-                                    }
-                                    .into()
-                                ),
+                                additional_properties: Some(false.into()),
                             },
                         ),
                     ]),
                     required: None,
-                    additional_properties: None,
+                    additional_properties: Some(false.into()),
                 },
                 description: "Do something cool".to_string(),
                 strict: false,
@@ -2137,6 +2153,7 @@ Examples of valid command strings:
                     "properties": {
                         "foo": { "type": "string" }
                     },
+                    "additionalProperties": false,
                 },
             })]
         );
@@ -2147,16 +2164,15 @@ Examples of valid command strings:
             tools_json,
             vec![json!({
                 "type": "function",
-                "name": "demo",
                 "function": {
                     "name": "demo",
                     "description": "A demo tool",
-                    "strict": false,
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "foo": { "type": "string" }
                         },
+                        "additionalProperties": false,
                     },
                 }
             })]
